@@ -1,132 +1,179 @@
-import requests # Importa a biblioteca 'requests' para efetuar chamadas HTTP e comunicar com a API da internet (GitHub).
-import pandas as pd # Importa o Pandas (com o apelido 'pd') para transformar os dados brutos em tabelas estruturadas (DataFrames) e guardá-los.
-import subprocess # Importa o módulo 'subprocess' para permitir que o Python execute comandos nativos do terminal (linha de comandos).
-import os # Importa funcionalidades do sistema operativo, utilizado aqui para verificar se uma pasta existe no disco rígido.
+import os # Importa ferramentas do sistema operacional. Permite ao Python criar pastas e ler configurações do seu computador.
+import subprocess # Permite que o Python "digite" comandos no terminal automaticamente, como se fosse um usuário humano.
+import pandas as pd # Importa o Pandas (apelidado de 'pd'), que funciona como um "Excel invisível" para organizar dados em tabelas e salvá-los.
+import requests # Importa o "carteiro" da internet: uma ferramenta que viaja até os servidores do GitHub para buscar as informações.
+from dotenv import load_dotenv # Importa a chave do cofre: lê o arquivo escondido '.env' para não deixarmos senhas expostas no código.
 
 # ==========================================
-# CONFIGURAÇÕES DA API
+# CONFIGURAÇÕES INICIAIS E SEGURANÇA
 # ==========================================
-# Insira o seu NOVO token gerado aqui. Ocultei o antigo por segurança.
-GITHUB_TOKEN = "SEU_NOVO_TOKEN_AQUI" 
 
+# Abre o arquivo '.env' e carrega a sua senha secreta para a memória do programa.
+load_dotenv()
+
+# Pega o token de acesso (a sua "identidade" no GitHub) que foi carregado no passo anterior.
+GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
+
+# Se você esqueceu de criar o arquivo .env ou de colocar o token lá, o programa avisa na tela.
+if not GITHUB_TOKEN:
+    print("Aviso: GITHUB_TOKEN não encontrado no ficheiro .env!")
+
+# Cria o "crachá" que enviaremos ao GitHub em cada pedido para provarmos quem somos.
 HEADERS = {
-    "Accept": "application/vnd.github+json", # Informa o GitHub que o nosso script espera receber a resposta em formato JSON.
-    "Authorization": f"Bearer {GITHUB_TOKEN}", # Envia o seu Token como um "crachá" de identificação, permitindo descarregar dados sem esbarrar no limite para utilizadores anónimos.
-    "X-GitHub-Api-Version": "2022-11-28", # Fixa a versão da API do GitHub para garantir que alterações futuras nos servidores deles não quebrem o seu script.
+    "Accept": "application/vnd.github+json", # Pede ao GitHub que entregue os dados no formato padrão da web (JSON, que parece um dicionário).
+    "Authorization": f"Bearer {GITHUB_TOKEN}", # Apresenta o seu token. Isso diz ao GitHub: "Sou eu, aumente meu limite de downloads".
+    "X-GitHub-Api-Version": "2022-11-28", # Fixa a versão do sistema do GitHub. Assim, se o GitHub atualizar amanhã, nosso robô não quebra.
 }
 
-# Cria uma lista de dicionários. Cada dicionário guarda o dono do projeto, o nome do repositório na web e a localização da pasta clonada no seu computador.
+# Uma lista contendo as rotas de cada projeto. Tem o nome do criador original (owner), o nome do projeto (repo) e onde ele está no seu disco (pasta).
 REPOSITORIOS = [
     {"owner": "pallets", "repo": "flask", "pasta": "./flask"},
     {"owner": "renpy", "repo": "renpy", "pasta": "./renpy"},
-    {"owner": "love2d", "repo": "love", "pasta": "./love"}
+    {"owner": "love2d", "repo": "love", "pasta": "./love"},
 ]
 
 # ==========================================
-# FUNÇÕES DE NUVEM (API GITHUB)
+# FUNÇÃO 1: BUSCAR QUEM AJUDA NO PROJETO
 # ==========================================
-def extrair_contribuidores(owner, repo):
-    url = f"https://api.github.com/repos/{owner}/{repo}/contributors" # Monta o endereço web (URL) exato para aceder à lista de contribuidores do projeto.
-    resp = requests.get(url, headers=HEADERS, params={"per_page": 100}) # Faz a requisição GET ao GitHub, pedindo para enviar 100 contribuidores por página.
-    if resp.status_code == 200: # Verifica se a resposta do servidor foi "200 OK" (sucesso).
-        # Converte a resposta JSON numa tabela do Pandas e guarda-a como um ficheiro CSV na sua pasta, sem incluir a coluna de índice (index=False).
-        pd.DataFrame(resp.json()).to_csv(f"{repo}_contrib.csv", index=False)
-        
-def extrair_issues_e_prs(owner, repo, limite=100):
-    """
-    Descarrega Issues e PRs juntos usando a rota de issues.
-    Isto garante que obtemos a contagem real de comentários e o título para classificar bugs/features.
-    """
-    url = f"https://api.github.com/repos/{owner}/{repo}/issues" # Monta o endereço da API para aceder às Issues (que no GitHub também incluem os Pull Requests).
-    resp = requests.get(url, headers=HEADERS, params={"state": "all", "per_page": limite}) # Pede os últimos 100 itens, independentemente de estarem abertos ou fechados ("state": "all").
+def extrair_contribuidores(owner, repo, pasta_destino):
+    # Monta o link exato da internet para pedir a lista de voluntários/funcionários do projeto.
+    url = f"https://api.github.com/repos/{owner}/{repo}/contributors"
     
-    if resp.status_code != 200: # Se o servidor não responder com sucesso (200), imprime um aviso e interrompe esta função.
+    # O "carteiro" (requests) bate na porta do GitHub e pede até 100 pessoas por página.
+    resp = requests.get(url, headers=HEADERS, params={"per_page": 100})
+    
+    # Se o servidor responder com "200" (o código universal da internet para "Tudo Certo!"):
+    if resp.status_code == 200:
+        # Pega a resposta, converte numa tabela de Excel (DataFrame) e salva como um arquivo .csv dentro da pasta correta.
+        pd.DataFrame(resp.json()).to_csv(f"{pasta_destino}/{repo}_contrib.csv", index=False)
+
+# ==========================================
+# FUNÇÃO 2: BUSCAR DEFEITOS E MELHORIAS (ISSUES E PRS)
+# ==========================================
+def extrair_issues_e_prs(owner, repo, pasta_destino, limite=100):
+    # Monta o link para buscar o mural de tarefas e discussões do projeto.
+    url = f"https://api.github.com/repos/{owner}/{repo}/issues"
+    
+    # Pede os últimos 100 registros do mural, mesmo os que já foram fechados ou resolvidos ("state": "all").
+    resp = requests.get(url, headers=HEADERS, params={"state": "all", "per_page": limite})
+    
+    # Se a internet cair ou o GitHub negar o acesso, ele avisa o erro e para o trabalho dessa função.
+    if resp.status_code != 200:
         print(f"Erro ao baixar PRs/Issues de {repo}: {resp.status_code}")
         return
-        
-    dados_prs = [] # Cria uma lista vazia para armazenar temporariamente os dados dos Pull Requests.
-    dados_issues = [] # Cria uma lista vazia para armazenar temporariamente os dados das Issues (tarefas normais).
+
+    dados_prs = [] # Cria uma gaveta vazia para guardar as sugestões de código (Pull Requests).
+    dados_issues = [] # Cria uma gaveta vazia para guardar as reclamações de defeitos ou pedidos de inovação (Issues).
     
-    for item in resp.json(): # Inicia um laço de repetição que vai iterar sobre cada um dos 100 itens descarregados do GitHub.
-        comentarios = item.get('comments', 0) # Tenta recolher a quantidade de comentários; se não existir, assume 0.
-        titulo = item.get('title', '').lower() # Puxa o título da postagem e converte-o todo para minúsculas (.lower()) para facilitar a pesquisa de palavras.
-        labels = [l['name'].lower() for l in item.get('labels', [])] # Puxa todas as etiquetas oficiais (labels) associadas ao item e também as converte para minúsculas.
-        
-        # Se a chave 'pull_request' existir dentro do item JSON, significa que é um código submetido (usado nas métricas 2, 3 e 6).
-        if 'pull_request' in item:
-            # Adiciona um dicionário à lista de PRs extraindo apenas as propriedades que nos interessam para a matemática.
+    # Para cada anotação (item) que o GitHub nos enviou:
+    for item in resp.json():
+        # Tenta ver quantos comentários a anotação tem. Se não tiver nada, anota 0.
+        comentarios = item.get("comments", 0)
+        # Pega o título da anotação e transforma tudo em letra minúscula para facilitar a nossa leitura automática.
+        titulo = item.get("title", "").lower()
+        # Pega as etiquetas (tags) coloridas que os chefes do projeto colaram na anotação.
+        labels = [l["name"].lower() for l in item.get("labels", [])]
+
+        # Se a anotação tiver uma marca d'água chamada 'pull_request', sabemos que alguém enviou código novo.
+        if "pull_request" in item:
+            # Guarda na gaveta de Pull Requests apenas as datas, os comentários e se o código foi aceito (merged_at).
             dados_prs.append({
                 "repo": repo,
-                "criado_em": item['created_at'], # Regista quando o PR foi aberto.
-                "fechado_em": item['closed_at'], # Regista quando foi fechado.
-                "comentarios": comentarios, # Regista o atrito/debate técnico.
-                "merge_feito": item.get('pull_request', {}).get('merged_at') is not None # Avalia como Verdadeiro (True) se existir uma data de "merged" (aceitação), ou Falso se for nulo.
+                "criado_em": item["created_at"],
+                "fechado_em": item["closed_at"],
+                "comentarios": comentarios,
+                "merge_feito": item.get("pull_request", {}).get("merged_at") is not None, # Vira 'True' se foi aceito, 'False' se foi rejeitado.
             })
-        # Se não tiver a chave 'pull_request', é uma Issue normal de discussão de falhas/ideias (usada na métrica 7).
+        
+        # Se não for envio de código, é apenas uma discussão (Issue).
         else:
-            categoria = 'outros' # Define a categoria padrão caso não consigamos identificar sobre o que é a Issue.
+            categoria = "outros" # Por padrão, dizemos que não sabemos do que se trata.
             
-            # Procura por palavras-chave indicadoras de falhas ('bug', 'fix', etc.) no título OU verifica se os mantenedores lhe colaram a etiqueta 'bug'.
-            if any(p in titulo for p in ['bug', 'fix', 'error', 'crash']) or 'bug' in labels:
-                categoria = 'bug' # Classifica oficialmente como anomalia.
-            # Procura por palavras-chave indicadoras de novidades ('add', 'feature', etc.) no título OU na etiqueta 'enhancement'.
-            elif any(p in titulo for p in ['add', 'feature', 'support']) or 'enhancement' in labels:
-                categoria = 'feature' # Classifica oficialmente como inovação/funcionalidade.
-                
-            # Adiciona o item classificado à lista de Issues com as suas datas de ciclo de vida.
+            # Se o título tiver a palavra 'bug', 'erro' ou se tiver a etiqueta oficial de bug:
+            if any(p in titulo for p in ["bug", "fix", "error", "crash"]) or "bug" in labels:
+                categoria = "bug" # Classifica como conserto de defeito.
+            
+            # Se o título tiver a palavra 'adicionar', 'nova' ou etiqueta de melhoria:
+            elif any(p in titulo for p in ["add", "feature", "support"]) or "enhancement" in labels:
+                categoria = "feature" # Classifica como criação de uma inovação.
+
+            # Guarda a discussão na gaveta de Issues com a sua categoria (Bug ou Inovação) e as datas.
             dados_issues.append({
                 "repo": repo,
                 "categoria": categoria,
-                "criado_em": item['created_at'],
-                "fechado_em": item['closed_at']
+                "criado_em": item["created_at"],
+                "fechado_em": item["closed_at"],
             })
-            
-    # Após processar os 100 itens, converte a lista de PRs numa tabela Pandas e guarda-a como CSV (apenas se a lista não estiver vazia).
-    if dados_prs: pd.DataFrame(dados_prs).to_csv(f"{repo}_prs.csv", index=False)
-    # Faz o mesmo para a lista de Issues classificada.
-    if dados_issues: pd.DataFrame(dados_issues).to_csv(f"{repo}_issues.csv", index=False)
 
-# ==========================================
-# FUNÇÕES LOCAIS (HISTÓRICO GIT)
-# ==========================================
-def extrair_git_local(pasta_repo, repo_nome):
-    """Lê o histórico do disco rígido para as métricas de Hotspots e Horários."""
-    if not os.path.exists(pasta_repo): # Verifica se o caminho no disco rígido (ex: ./flask) realmente existe.
-        print(f"Aviso: Pasta '{pasta_repo}' não encontrada. Faça o git clone primeiro para ter as métricas locais.")
-        return # Se não existir, cancela a execução local.
-        
-    # Prepara o comando a ser injetado no terminal: pede ao Git o histórico de alterações (log) mostrando apenas os nomes dos ficheiros e a data/hora exata (ISO).
-    comando = ['git', '-C', pasta_repo, 'log', '--name-only', '--format=COMMIT|%ad', '--date=iso']
-    # O Python executa o comando silenciosamente nos bastidores e captura o texto que o Git "cuspiu" na variável 'resultado'.
-    resultado = subprocess.run(comando, stdout=subprocess.PIPE, text=True, errors='ignore')
+    # Se a gaveta de Pull Requests não estiver vazia, transforma num arquivo CSV e salva no disco.
+    if dados_prs:
+        pd.DataFrame(dados_prs).to_csv(f"{pasta_destino}/{repo}_prs.csv", index=False)
     
-    datas, arquivos = [], [] # Listas para acumular as datas extraídas e os nomes dos ficheiros alterados.
-    data_atual = None # Variável de controlo para guardar a data do commit que está a ser lido no momento.
+    # Se a gaveta de Issues não estiver vazia, faz a mesma coisa.
+    if dados_issues:
+        pd.DataFrame(dados_issues).to_csv(f"{pasta_destino}/{repo}_issues.csv", index=False)
+
+# ==========================================
+# FUNÇÃO 3: LER O DIÁRIO LOCAL DO COMPUTADOR
+# ==========================================
+def extrair_git_local(pasta_repo, repo_nome, pasta_destino):
+    # Verifica se a pasta do projeto (ex: ./flask) realmente existe no seu computador.
+    if not os.path.exists(pasta_repo):
+        print(f"Aviso: Pasta '{pasta_repo}' não encontrada. Você precisa fazer o download do código primeiro.")
+        return # Se a pasta não existir, cancela essa etapa.
+
+    # Prepara uma instrução para o sistema operacional: "Abra a pasta do projeto e me dê a lista de todos os arquivos modificados e a hora exata".
+    comando = ["git", "-C", pasta_repo, "log", "--name-only", "--format=COMMIT|%ad", "--date=iso"]
     
-    # Separa o texto gigantesco do Git linha por linha e itera sobre ele.
-    for linha in resultado.stdout.split('\n'):
-        linha = linha.strip() # Remove espaços vazios no início e no fim da linha.
-        if not linha: continue # Se a linha estiver em branco, salta para a próxima.
+    # O Python "digita" a instrução de forma invisível e guarda toda a resposta do terminal na variável 'resultado'.
+    resultado = subprocess.run(comando, stdout=subprocess.PIPE, text=True, errors="ignore")
+
+    datas = [] # Gaveta para as datas em que as pessoas trabalharam.
+    arquivos = [] # Gaveta para os nomes dos arquivos que foram consertados.
+    data_atual = None # Um marcador para o robô não se perder enquanto lê a lista.
+
+    # O robô lê a resposta gigante do terminal, cortando-a linha por linha.
+    for linha in resultado.stdout.split("\n"):
+        linha = linha.strip() # Limpa espaços em branco inúteis no começo e no fim da linha.
         
-        if linha.startswith('COMMIT|'): # Se a linha começar com a tag criada, sabemos que é um bloco de data.
-            data_atual = linha.split('|')[1] # Divide o texto pelo tubo '|' e guarda apenas a parte da data/hora.
-            datas.append({"repo": repo_nome, "data_str": data_atual}) # Adiciona a data encontrada à lista de horários.
-        elif data_atual: # Se não começou com 'COMMIT|', então é o nome de um ficheiro que foi alterado naquele momento.
-            arquivos.append({"repo": repo_nome, "arquivo": linha}) # Adiciona o nome do ficheiro à lista de Hotspots.
+        if not linha: # Se a linha estiver vazia, pula para a próxima.
+            continue
             
-    # Converte as listas de datas e de ficheiros alterados em tabelas Pandas independentes e guarda-as no disco.
-    pd.DataFrame(datas).to_csv(f"{repo_nome}_datas_git.csv", index=False)
-    pd.DataFrame(arquivos).to_csv(f"{repo_nome}_hotspots_git.csv", index=False)
+        # Se a linha começar com a nossa marca "COMMIT|", o robô sabe que acabou de achar um registro de data e hora.
+        if linha.startswith("COMMIT|"):
+            data_atual = linha.split("|")[1] # Corta a palavra 'COMMIT' e pega só a data, guardando na memória.
+            datas.append({"repo": repo_nome, "data_str": data_atual}) # Guarda a data na gaveta.
+            
+        # Se não tiver a marca "COMMIT|", o robô entende que aquilo é o nome de um arquivo que foi alterado naquela mesma data.
+        elif data_atual:
+            arquivos.append({"repo": repo_nome, "arquivo": linha}) # Guarda o nome do arquivo na gaveta.
+
+    # Transforma a gaveta de datas em tabela CSV e salva.
+    pd.DataFrame(datas).to_csv(f"{pasta_destino}/{repo_nome}_datas_git.csv", index=False)
+    # Transforma a gaveta de arquivos em tabela CSV e salva. Isso revelará os "Hotspots" (arquivos mais defeituosos).
+    pd.DataFrame(arquivos).to_csv(f"{pasta_destino}/{repo_nome}_hotspots_git.csv", index=False)
 
 # ==========================================
-# EXECUÇÃO DA EXTRAÇÃO
+# O MOTOR PRINCIPAL (ONDE TUDO COMEÇA)
 # ==========================================
-# Bloco final que põe o código inteiro a trabalhar de forma orquestrada.
-for p in REPOSITORIOS: # Para cada um dos três projetos configurados lá em cima...
-    print(f"[{p['repo']}] A iniciar extração completa...") # Avisa no terminal qual projeto está a ser minado.
-    extrair_contribuidores(p["owner"], p["repo"]) # Aciona a função 1 (Contribuidores).
-    extrair_issues_e_prs(p["owner"], p["repo"]) # Aciona a função 2 (Bugs, Features e PRs).
-    extrair_git_local(p["pasta"], p["repo"]) # Aciona a função 3 (Horários e Arquivos Locais).
+# Aqui o robô repete todo o processo acima para cada um dos 3 projetos (Flask, Renpy, Love).
+for p in REPOSITORIOS:
+    print(f"[{p['repo']}] A extrair dados...") # Avisa na tela qual projeto está sendo analisado agora.
+    
+    # Cria dinamicamente o caminho da pasta onde os dados vão ficar organizados (ex: 'dados/flask').
+    pasta_destino = f"dados/{p['repo']}"
+    
+    # Pede ao computador para criar a pasta fisicamente. Se ela já existir, ele não faz nada e segue em frente.
+    os.makedirs(pasta_destino, exist_ok=True)
 
-# Mensagem de encerramento avisando que toda a mineração e criação de bases de dados CSV foi concluída.
-print("\nExtração consolidada concluída com sucesso! Tabelas prontas.")
+    # Executa a Função 1 (Baixar Contribuidores)
+    extrair_contribuidores(p["owner"], p["repo"], pasta_destino)
+    
+    # Executa a Função 2 (Baixar Bugs e Features)
+    extrair_issues_e_prs(p["owner"], p["repo"], pasta_destino)
+    
+    # Executa a Função 3 (Ler arquivos locais do disco rígido)
+    extrair_git_local(p["pasta"], p["repo"], pasta_destino)
+
+# Quando terminar todos os 3 projetos, avisa que o trabalho pesado acabou.
+print("\nExtração concluída com sucesso! Ficheiros salvos de forma organizada na pasta 'dados/'.")
